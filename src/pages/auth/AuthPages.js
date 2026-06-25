@@ -51,7 +51,7 @@ export function LoginPage() {
         </p>
 
         <div style={{ marginTop: 16, padding: 12, background: '#f9fafb', borderRadius: 6, fontSize: 12, color: '#9ca3af' }}>
-          <b>Admin:</b> admin@biblioteca.com / admin123
+          <b>Admin:</b> admin@admin.com / 123456789
         </div>
       </div>
     </div>

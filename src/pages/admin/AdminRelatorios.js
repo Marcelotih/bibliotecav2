@@ -49,8 +49,8 @@ export default function AdminRelatorios() {
 
   const tabs = [
     { id: 'ocupacao', label: '📊 Ocupação' },
-    { id: 'cadastros', label: '👥 Cadastros' },
-    { id: 'por-usuario', label: '📋 Por Usuário' },
+    { id: 'cadastros', label: '👥 Cadastros feitos' },
+    { id: 'por-usuario', label: '📋 Reservas feitas' },
   ];
 
   return (

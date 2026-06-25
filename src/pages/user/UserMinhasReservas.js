@@ -40,6 +40,15 @@ export default function UserMinhasReservas() {
     } catch (err) { setErro(err.message); }
   }
 
+  async function handleCheckout(id) {
+    setErro('');
+    try {
+      await reservaService.checkout(id);
+      setSucesso('Check-out realizado. Obrigado!');
+      carregar();
+    } catch (err) { setErro(err.message); }
+  }
+
   const filtradas = reservas.filter(r => {
     if (filtro === 'ativas') return ['pendente', 'confirmada', 'checkin'].includes(r.status);
     if (filtro === 'historico') return ['concluida', 'cancelada'].includes(r.status);
@@ -92,7 +101,12 @@ export default function UserMinhasReservas() {
                   </div>
                   {r.status === 'confirmada' && (
                     <div style={{ fontSize: 12, color: '#d97706', marginTop: 6 }}>
-                      ⚠️ Check-in disponível 5 min antes do início
+                      ⚠️ Check-in disponível 30 min antes do início
+                    </div>
+                  )}
+                  {r.status === 'pendente' && (
+                    <div style={{ fontSize: 12, color: '#d97706', marginTop: 6 }}>
+                      Aguardando aprovação do admin para uso acima de 1 hora
                     </div>
                   )}
                   {r.status === 'cancelada' && r.canceladoEm && (
@@ -105,6 +119,11 @@ export default function UserMinhasReservas() {
                   {r.status === 'confirmada' && (
                     <Button size="sm" variant="success" onClick={() => handleCheckin(r.id)}>
                       Check-in
+                    </Button>
+                  )}
+                  {r.status === 'checkin' && (
+                    <Button size="sm" variant="outline" onClick={() => handleCheckout(r.id)}>
+                      Check-out
                     </Button>
                   )}
                   {['pendente', 'confirmada'].includes(r.status) && (

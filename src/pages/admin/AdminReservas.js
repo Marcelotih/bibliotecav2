@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { reservaService, computadorService, salaService, usuarioService } from '../../services/api';
 import { Card, Button, Input, Alert, Modal, Table, PageHeader, Spinner, Badge, Select } from '../../components/common/UI';
-import { today, formatDate, gerarSlots, slotOcupado } from '../../utils/helpers';
+import { today, formatDate, gerarSlots, slotOcupado, pessoasNoSlot } from '../../utils/helpers';
 import { useAuth } from '../../contexts/AuthContext';
 
 export default function AdminReservas() {
@@ -53,12 +53,20 @@ export default function AdminReservas() {
     } catch (err) { setErro(err.message); }
   }
 
+  async function handleAprovar(id) {
+    try {
+      await reservaService.aprovar(id);
+      setSucesso('Reserva aprovada');
+      carregar();
+    } catch (err) { setErro(err.message); }
+  }
+
   return (
     <div>
       <PageHeader
         title="Reservas"
         subtitle="Gerenciar todas as reservas"
-        action={<Button onClick={() => setModalNovaReserva(true)}>+ Reserva Imediata</Button>}
+        action={<Button onClick={() => setModalNovaReserva(true)}>+ Nova Reserva</Button>}
       />
 
       {erro && <div style={{ marginBottom: 14 }}><Alert type="error">{erro}</Alert></div>}
@@ -106,6 +114,7 @@ export default function AdminReservas() {
               { key: 'status', label: 'Status', render: r => <Badge status={r.status} /> },
               { key: 'acoes', label: 'Ações', render: r => (
                 <div style={{ display: 'flex', gap: 6 }}>
+                  {r.status === 'pendente' && <Button size="sm" variant="success" onClick={() => handleAprovar(r.id)}>Aprovar</Button>}
                   {r.status === 'confirmada' && <Button size="sm" variant="success" onClick={() => handleCheckin(r.id)}>Check-in</Button>}
                   {r.status === 'checkin' && <Button size="sm" variant="outline" onClick={() => handleCheckout(r.id)}>Check-out</Button>}
                   {['pendente', 'confirmada'].includes(r.status) && (
@@ -190,8 +199,6 @@ function ModalNovaReservaAdmin({ adminId, onClose, onSuccess }) {
     }
   }
 
-  const slotsLivres = slots.filter(s => !slotOcupado(s, ocupados));
-
   return (
     <Modal open onClose={onClose} title="Nova Reserva (Admin)">
       {erro && <div style={{ marginBottom: 12 }}><Alert type="error">{erro}</Alert></div>}
@@ -216,7 +223,9 @@ function ModalNovaReservaAdmin({ adminId, onClose, onSuccess }) {
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Horários disponíveis:</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
                 {slots.map(s => {
-                  const ocupado = slotOcupado(s, ocupados);
+                  const capacidade = tipo === 'computador' ? 2 : 1;
+                  const pessoas = pessoasNoSlot(s, ocupados);
+                  const ocupado = slotOcupado(s, ocupados, capacidade) || pessoas + Number(numPessoas || 1) > capacidade;
                   const sel = horaInicio === s.inicio;
                   return (
                     <button type="button" key={s.inicio} disabled={ocupado}

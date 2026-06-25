@@ -1,359 +1,230 @@
-/**
- * CAMADA DE SERVIÇO — localStorage agora, API REST depois.
- * Para migrar: substitua os métodos abaixo por fetch('/api/...').
- * Todos os métodos retornam Promise para já simular comportamento assíncrono.
- */
+const BASE_URL = 'http://localhost:8080';
 
-// ─── SEED INICIAL ────────────────────────────────────────────────────────────
-const SEED_KEY = '__biblioteca_seeded__';
+// ─── HELPERS HTTP ─────────────────────────────────────────────────────────────
 
-function seed() {
-  if (localStorage.getItem(SEED_KEY)) return;
-
-  // Admin padrão
-  const users = [
-    {
-      id: 'admin-1',
-      nome: 'Administrador',
-      email: 'admin@biblioteca.com',
-      senha: 'admin123',
-      cpf: '000.000.000-00',
-      tipo: 'admin',
-      modalidade: null,
-      ativo: true,
-      criadoEm: new Date().toISOString(),
-    },
-  ];
-
-  // Computadores
-  const computadores = Array.from({ length: 10 }, (_, i) => ({
-    id: `pc-${i + 1}`,
-    patrimonio: `PAT-${String(i + 1).padStart(4, '0')}`,
-    descricao: `Computador ${i + 1}`,
-    ativo: true,
-    criadoEm: new Date().toISOString(),
-  }));
-
-  // Salas
-  const salas = [
-    { id: 'sala-1', nome: 'Sala A', patrimonio: 'SAL-0001', capacidade: 5, ativo: true, criadoEm: new Date().toISOString() },
-    { id: 'sala-2', nome: 'Sala B', patrimonio: 'SAL-0002', capacidade: 5, ativo: true, criadoEm: new Date().toISOString() },
-    { id: 'sala-3', nome: 'Sala C', patrimonio: 'SAL-0003', capacidade: 5, ativo: true, criadoEm: new Date().toISOString() },
-  ];
-
-  _set('usuarios', users);
-  _set('computadores', computadores);
-  _set('salas', salas);
-  _set('reservas', []);
-  localStorage.setItem(SEED_KEY, '1');
+function getToken() {
+  try {
+    const session = JSON.parse(localStorage.getItem('__session__'));
+    return session?.token || null;
+  } catch {
+    return null;
+  }
 }
 
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
-function _get(key) {
-  try { return JSON.parse(localStorage.getItem(key)) || []; } catch { return []; }
-}
-function _set(key, data) {
-  localStorage.setItem(key, JSON.stringify(data));
-}
-function _id() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2);
-}
-function delay(ms = 50) {
-  return new Promise(r => setTimeout(r, ms));
+async function http(method, path, body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = getToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  let res;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (networkErr) {
+    // fetch jogou exceção = back fora do ar, sem rede ou CORS bloqueando
+    throw new Error('Não foi possível conectar ao servidor. Verifique se o back-end está rodando.');
+  }
+
+  if (res.status === 204 || res.headers.get('content-length') === '0') return null;
+
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = text; }
+
+  if (!res.ok) {
+    const msg = typeof data === 'string' ? data : data?.message || data?.error || `Erro ${res.status}`;
+    throw new Error(msg);
+  }
+
+  return data;
 }
 
-seed();
+const get    = (path)         => http('GET',    path);
+const post   = (path, body)   => http('POST',   path, body);
+const put    = (path, body)   => http('PUT',    path, body);
+const patch  = (path, body)   => http('PATCH',  path, body);
+const del    = (path)         => http('DELETE', path);
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
 export const authService = {
   async login(email, senha) {
-    await delay();
-    const users = _get('usuarios');
-    const user = users.find(u => u.email === email && u.senha === senha && u.ativo);
-    if (!user) throw new Error('Email ou senha inválidos');
-    const { senha: _, ...safe } = user;
-    return safe;
+    const data = await post('/auth/login', { email, senha });
+    // data = { token, tipo, nivelAcesso, id, nome, email, cpf }
+    return data;
   },
 
   async cadastrar(dados) {
-    await delay();
-    const users = _get('usuarios');
-    if (users.find(u => u.email === dados.email)) throw new Error('Email já cadastrado');
-    if (users.find(u => u.cpf === dados.cpf)) throw new Error('CPF já cadastrado');
-    const novo = { id: _id(), ...dados, tipo: dados.tipo || 'aluno', ativo: true, criadoEm: new Date().toISOString() };
-    _set('usuarios', [...users, novo]);
-    const { senha: _, ...safe } = novo;
-    return safe;
+    return post('/auth/cadastro', {
+      email: dados.email,
+      senha: dados.senha,
+      nome: dados.nome,
+      cpf: dados.cpf,
+      tipo: dados.tipo || 'aluno',
+      modalidade: dados.modalidade,
+    });
   },
 };
 
-// ─── USUÁRIOS (admin) ─────────────────────────────────────────────────────────
+// ─── USUÁRIOS ─────────────────────────────────────────────────────────────────
 export const usuarioService = {
   async listar() {
-    await delay();
-    return _get('usuarios').filter(u => u.tipo !== 'admin').sort((a, b) => a.nome.localeCompare(b.nome));
+    const lista = await get('/usuarios');
+    // Filtra admins fora (nivel ADMIN) e ordena por nome
+    return lista
+      .filter(u => u.ativo !== false && u.nivelAcesso !== 'ADMIN')
+      .sort((a, b) => (a.nome || '').localeCompare(b.nome || ''));
   },
 
   async buscarPorCpf(cpf) {
-    await delay();
-    const users = _get('usuarios');
-    return users.find(u => u.cpf === cpf) || null;
+    const lista = await get('/usuarios');
+    return lista.find(u => u.cpf === cpf) || null;
   },
 
   async atualizar(id, dados) {
-    await delay();
-    const users = _get('usuarios').map(u => u.id === id ? { ...u, ...dados } : u);
-    _set('usuarios', users);
-    return users.find(u => u.id === id);
+    return put(`/usuarios/${id}`, dados);
   },
 };
 
 // ─── COMPUTADORES ─────────────────────────────────────────────────────────────
 export const computadorService = {
   async listar() {
-    await delay();
-    return _get('computadores');
+    return get('/computadores');
   },
 
   async buscarPorPatrimonio(patrimonio) {
-    await delay();
-    return _get('computadores').find(c => c.patrimonio.toLowerCase() === patrimonio.toLowerCase()) || null;
+    const lista = await get('/computadores');
+    return lista.find(c => c.patrimonio?.toLowerCase() === patrimonio?.toLowerCase()) || null;
   },
 
   async criar(dados) {
-    await delay();
-    const lista = _get('computadores');
-    if (lista.find(c => c.patrimonio === dados.patrimonio)) throw new Error('Patrimônio já cadastrado');
-    const novo = { id: _id(), ...dados, ativo: true, criadoEm: new Date().toISOString() };
-    _set('computadores', [...lista, novo]);
-    return novo;
+    return post('/computadores', dados);
   },
 
   async atualizar(id, dados) {
-    await delay();
-    const lista = _get('computadores').map(c => c.id === id ? { ...c, ...dados } : c);
-    _set('computadores', lista);
-    return lista.find(c => c.id === id);
+    return put(`/computadores/${id}`, dados);
   },
 
   async toggleAtivo(id) {
-    await delay();
-    const lista = _get('computadores').map(c => c.id === id ? { ...c, ativo: !c.ativo } : c);
-    _set('computadores', lista);
-    return lista.find(c => c.id === id);
+    const lista = await get('/computadores');
+    const item = lista.find(c => c.id === id);
+    if (!item) throw new Error('Computador não encontrado');
+    return put(`/computadores/${id}`, { ...item, ativo: !item.ativo });
   },
 };
 
 // ─── SALAS ────────────────────────────────────────────────────────────────────
 export const salaService = {
   async listar() {
-    await delay();
-    return _get('salas');
+    return get('/salas');
   },
 
   async buscarPorPatrimonio(patrimonio) {
-    await delay();
-    return _get('salas').find(s => s.patrimonio.toLowerCase() === patrimonio.toLowerCase()) || null;
+    const lista = await get('/salas');
+    return lista.find(s => s.patrimonio?.toLowerCase() === patrimonio?.toLowerCase()) || null;
   },
 
   async criar(dados) {
-    await delay();
-    const lista = _get('salas');
-    if (lista.find(s => s.patrimonio === dados.patrimonio)) throw new Error('Patrimônio já cadastrado');
-    const nova = { id: _id(), ...dados, ativo: true, criadoEm: new Date().toISOString() };
-    _set('salas', [...lista, nova]);
-    return nova;
+    return post('/salas', dados);
   },
 
   async atualizar(id, dados) {
-    await delay();
-    const lista = _get('salas').map(s => s.id === id ? { ...s, ...dados } : s);
-    _set('salas', lista);
-    return lista.find(s => s.id === id);
+    return put(`/salas/${id}`, dados);
   },
 
   async toggleAtivo(id) {
-    await delay();
-    const lista = _get('salas').map(s => s.id === id ? { ...s, ativo: !s.ativo } : s);
-    _set('salas', lista);
-    return lista.find(s => s.id === id);
+    const lista = await get('/salas');
+    const item = lista.find(s => s.id === id);
+    if (!item) throw new Error('Sala não encontrada');
+    return put(`/salas/${id}`, { ...item, ativo: !item.ativo });
   },
 };
 
 // ─── RESERVAS ─────────────────────────────────────────────────────────────────
-// Status: pendente | confirmada | checkin | concluida | cancelada
 export const reservaService = {
   async listar(filtros = {}) {
-    await delay();
-    let reservas = _get('reservas');
-    if (filtros.usuarioId) reservas = reservas.filter(r => r.usuarioId === filtros.usuarioId);
-    if (filtros.status) reservas = reservas.filter(r => r.status === filtros.status);
-    if (filtros.tipo) reservas = reservas.filter(r => r.tipo === filtros.tipo);
-    if (filtros.data) reservas = reservas.filter(r => r.data === filtros.data);
-    return reservas.sort((a, b) => new Date(b.criadoEm) - new Date(a.criadoEm));
+    // O back retorna tudo via GET /reservas. Filtragem no front por ora.
+    const lista = await get('/reservas');
+    let result = lista;
+    if (filtros.usuarioId) result = result.filter(r => String(r.usuarioId) === String(filtros.usuarioId));
+    if (filtros.status)    result = result.filter(r => r.status === filtros.status);
+    if (filtros.tipo)      result = result.filter(r => r.tipo === filtros.tipo);
+    if (filtros.data)      result = result.filter(r => r.data === filtros.data);
+    return result.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   },
 
   async buscarPorId(id) {
-    await delay();
-    return _get('reservas').find(r => r.id === id) || null;
+    return get(`/reservas/${id}`);
   },
 
-  /**
-   * Verifica disponibilidade de um recurso em data/hora.
-   * tipo: 'computador' | 'sala'
-   * Retorna lista de slots ocupados na data.
-   */
   async horariosOcupados(tipo, recursoId, data) {
-    await delay();
-    const reservas = _get('reservas').filter(
-      r => r.tipo === tipo && r.recursoId === recursoId && r.data === data &&
-        !['cancelada'].includes(r.status)
-    );
-    return reservas.map(r => ({ inicio: r.horaInicio, fim: r.horaFim, reservaId: r.id }));
+    return get(`/reservas/ocupados?tipo=${tipo}&recursoId=${recursoId}&data=${data}`);
   },
 
   async criar(dados) {
-    await delay();
-    const reservas = _get('reservas');
-
-    // Valida mínimo 1 hora
-    const [ih, im] = dados.horaInicio.split(':').map(Number);
-    const [fh, fm] = dados.horaFim.split(':').map(Number);
-    const duracaoMin = (fh * 60 + fm) - (ih * 60 + im);
-    if (duracaoMin < 60) throw new Error('Reserva mínima de 1 hora');
-
-    // Valida conflito
-    const conflito = reservas.find(r =>
-      r.tipo === dados.tipo &&
-      r.recursoId === dados.recursoId &&
-      r.data === dados.data &&
-      !['cancelada'].includes(r.status) &&
-      !(dados.horaFim <= r.horaInicio || dados.horaInicio >= r.horaFim)
-    );
-    if (conflito) throw new Error('Horário já reservado');
-
-    // Limite por recurso
-    if (dados.tipo === 'computador') {
-      const ocupantes = reservas.filter(r =>
-        r.tipo === 'computador' && r.recursoId === dados.recursoId &&
-        r.data === dados.data && !['cancelada'].includes(r.status) &&
-        !(dados.horaFim <= r.horaInicio || dados.horaInicio >= r.horaFim)
-      );
-      if (ocupantes.length >= 2) throw new Error('Limite de 2 pessoas por computador atingido');
-    }
-
-    const nova = {
-      id: _id(),
-      ...dados,
-      status: dados.adminReserva ? 'confirmada' : 'pendente',
-      criadoEm: new Date().toISOString(),
-    };
-    _set('reservas', [...reservas, nova]);
-    return nova;
+    return post('/reservas', {
+      tipo: dados.tipo,
+      recursoId: Number(dados.recursoId),
+      recursoNome: dados.recursoNome,
+      usuarioId: Number(dados.usuarioId),
+      nomeUsuario: dados.nomeUsuario,
+      data: dados.data,
+      horaInicio: dados.horaInicio,
+      horaFim: dados.horaFim,
+      numPessoas: Number(dados.numPessoas || 1),
+      adminReserva: Boolean(dados.adminReserva),
+    });
   },
 
   async cancelar(id, usuarioId, isAdmin = false) {
-    await delay();
-    const reservas = _get('reservas');
-    const reserva = reservas.find(r => r.id === id);
-    if (!reserva) throw new Error('Reserva não encontrada');
-    if (!isAdmin && reserva.usuarioId !== usuarioId) throw new Error('Sem permissão');
-    if (['checkin', 'concluida', 'cancelada'].includes(reserva.status)) {
-      throw new Error('Não é possível cancelar reserva neste status');
-    }
+    return patch(`/reservas/${id}/cancelar?admin=${isAdmin}`);
+  },
 
-    // Limite de cancelamento: 30 min antes (configurável)
-    if (!isAdmin) {
-      const agora = new Date();
-      const inicio = new Date(`${reserva.data}T${reserva.horaInicio}`);
-      const diffMin = (inicio - agora) / 60000;
-      if (diffMin < 30) throw new Error('Cancelamento só é permitido até 30 minutos antes do início');
-    }
-
-    const atualizadas = reservas.map(r => r.id === id ? { ...r, status: 'cancelada', canceladoEm: new Date().toISOString() } : r);
-    _set('reservas', atualizadas);
-    return atualizadas.find(r => r.id === id);
+  async aprovar(id) {
+    return patch(`/reservas/${id}/aprovar`);
   },
 
   async checkin(id, usuarioId, isAdmin = false) {
-    await delay();
-    const reservas = _get('reservas');
-    const reserva = reservas.find(r => r.id === id);
-    if (!reserva) throw new Error('Reserva não encontrada');
-
-    // Check-in só 5 min antes
-    if (!isAdmin) {
-      const agora = new Date();
-      const inicio = new Date(`${reserva.data}T${reserva.horaInicio}`);
-      const diffMin = (inicio - agora) / 60000;
-      if (diffMin > 5) throw new Error('Check-in disponível apenas 5 minutos antes do início');
-    }
-
-    const atualizadas = reservas.map(r => r.id === id ? { ...r, status: 'checkin', checkinEm: new Date().toISOString() } : r);
-    _set('reservas', atualizadas);
-    return atualizadas.find(r => r.id === id);
+    return patch(`/reservas/${id}/checkin?admin=${isAdmin}`);
   },
 
   async checkout(id) {
-    await delay();
-    const reservas = _get('reservas').map(r =>
-      r.id === id ? { ...r, status: 'concluida', checkoutEm: new Date().toISOString() } : r
-    );
-    _set('reservas', reservas);
-    return reservas.find(r => r.id === id);
+    return patch(`/reservas/${id}/checkout`);
   },
 };
 
-// ─── RELATÓRIOS ───────────────────────────────────────────────────────────────
+// ─── RELATÓRIOS ─── (calculados no front com dados da API) ───────────────────
 export const relatorioService = {
   async ocupacao(periodo = {}) {
-    await delay();
-    let reservas = _get('reservas');
+    let reservas = await get('/reservas');
     if (periodo.inicio) reservas = reservas.filter(r => r.data >= periodo.inicio);
-    if (periodo.fim) reservas = reservas.filter(r => r.data <= periodo.fim);
+    if (periodo.fim)    reservas = reservas.filter(r => r.data <= periodo.fim);
 
     const total = reservas.length;
-    const porStatus = reservas.reduce((acc, r) => {
-      acc[r.status] = (acc[r.status] || 0) + 1;
-      return acc;
-    }, {});
-    const porTipo = reservas.reduce((acc, r) => {
-      acc[r.tipo] = (acc[r.tipo] || 0) + 1;
-      return acc;
-    }, {});
-    const porDia = reservas.reduce((acc, r) => {
-      acc[r.data] = (acc[r.data] || 0) + 1;
-      return acc;
-    }, {});
-
+    const porStatus = reservas.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {});
+    const porTipo   = reservas.reduce((acc, r) => { acc[r.tipo]   = (acc[r.tipo]   || 0) + 1; return acc; }, {});
+    const porDia    = reservas.reduce((acc, r) => { acc[r.data]   = (acc[r.data]   || 0) + 1; return acc; }, {});
     return { total, porStatus, porTipo, porDia };
   },
 
   async cadastros() {
-    await delay();
-    const usuarios = _get('usuarios').filter(u => u.tipo !== 'admin');
-    const porTipo = usuarios.reduce((acc, u) => {
-      acc[u.tipo] = (acc[u.tipo] || 0) + 1;
-      return acc;
-    }, {});
+    const usuarios = (await get('/usuarios')).filter(u => u.nivelAcesso !== 'ADMIN');
+    const porTipo = usuarios.reduce((acc, u) => { acc[u.tipo || 'aluno'] = (acc[u.tipo || 'aluno'] || 0) + 1; return acc; }, {});
     const porModalidade = usuarios.reduce((acc, u) => {
       const m = u.modalidade || 'Não informado';
       acc[m] = (acc[m] || 0) + 1;
       return acc;
     }, {});
-    return { total: usuarios.length, porTipo, porModalidade, lista: usuarios.sort((a, b) => a.nome.localeCompare(b.nome)) };
+    return { total: usuarios.length, porTipo, porModalidade, lista: usuarios.sort((a, b) => (a.nome || '').localeCompare(b.nome || '')) };
   },
 
   async reservasPorUsuario() {
-    await delay();
-    const reservas = _get('reservas');
-    const usuarios = _get('usuarios');
-    const mapa = reservas.reduce((acc, r) => {
-      acc[r.usuarioId] = (acc[r.usuarioId] || 0) + 1;
-      return acc;
-    }, {});
+    const [reservas, usuarios] = await Promise.all([get('/reservas'), get('/usuarios')]);
+    const mapa = reservas.reduce((acc, r) => { acc[r.usuarioId] = (acc[r.usuarioId] || 0) + 1; return acc; }, {});
     return Object.entries(mapa).map(([uid, qtd]) => {
-      const u = usuarios.find(x => x.id === uid);
+      const u = usuarios.find(x => String(x.id) === String(uid));
       return { usuarioId: uid, nome: u?.nome || 'Desconhecido', qtd };
     }).sort((a, b) => b.qtd - a.qtd);
   },

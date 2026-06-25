@@ -46,6 +46,12 @@ export function gerarSlots(inicio = '07:00', fim = '22:00', intervalo = 60) {
   return slots;
 }
 
-export function slotOcupado(slot, ocupados) {
-  return ocupados.some(o => !(slot.fim <= o.inicio || slot.inicio >= o.fim));
+export function pessoasNoSlot(slot, ocupados) {
+  return ocupados
+    .filter(o => !(slot.fim <= o.inicio || slot.inicio >= o.fim))
+    .reduce((total, o) => total + Number(o.numPessoas || 1), 0);
+}
+
+export function slotOcupado(slot, ocupados, capacidade = 1) {
+  return pessoasNoSlot(slot, ocupados) >= capacidade;
 }

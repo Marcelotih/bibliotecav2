@@ -12,6 +12,27 @@ export default function AdminSalas() {
   const [form, setForm] = useState({ patrimonio: '', nome: '', capacidade: 5 });
   const [erro, setErro] = useState('');
   const [sucesso, setSucesso] = useState('');
+  const [populando, setPopulando] = useState(false);
+
+  const SALAS_SEED = [
+    { patrimonio: 'SALA-01', nome: 'Sala de Reunião', descricao: 'Sala para grupos', capacidade: 5 },
+    { patrimonio: 'SALA-02', nome: 'Sala de Reunião', descricao: 'Sala para grupos', capacidade: 5 },
+    { patrimonio: 'SALA-03', nome: 'Sala de Reunião', descricao: 'Sala para grupos', capacidade: 5 },
+    { patrimonio: 'SALA-04', nome: 'Sala de Reunião', descricao: 'Sala para grupos', capacidade: 5 },
+    { patrimonio: 'SALA-05', nome: 'Sala de Reunião', descricao: 'Sala para grupos', capacidade: 5 },
+  ];
+
+  async function handlePopular() {
+    setPopulando(true);
+    setErro('');
+    let criados = 0;
+    for (const sala of SALAS_SEED) {
+      try { await salaService.criar(sala); criados++; } catch (_) {}
+    }
+    setSucesso(`${criados} sala(s) criada(s)!`);
+    setPopulando(false);
+    carregar();
+  }
 
   async function carregar() {
     setLoading(true);
@@ -49,7 +70,14 @@ export default function AdminSalas() {
       <PageHeader
         title="Salas"
         subtitle="Gerenciar salas e disponibilidade"
-        action={<Button onClick={() => setModalForm(true)}>+ Nova Sala</Button>}
+        action={
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="outline" onClick={handlePopular} disabled={populando}>
+              {populando ? '⏳ Criando...' : '🚀 Popular Dados'}
+            </Button>
+            <Button onClick={() => setModalForm(true)}>+ Nova Sala</Button>
+          </div>
+        }
       />
 
       {sucesso && <div style={{ marginBottom: 14 }}><Alert type="success">{sucesso}</Alert></div>}

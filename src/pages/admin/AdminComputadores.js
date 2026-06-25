@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { computadorService, reservaService } from '../../services/api';
 import { Card, Button, Badge, Input, Alert, Modal, Table, PageHeader, Spinner } from '../../components/common/UI';
-import { today, formatDate, gerarSlots, slotOcupado } from '../../utils/helpers';
+import { today, formatDate, gerarSlots, slotOcupado, pessoasNoSlot } from '../../utils/helpers';
 
 export default function AdminComputadores() {
   const [lista, setLista] = useState([]);
@@ -12,6 +12,32 @@ export default function AdminComputadores() {
   const [form, setForm] = useState({ patrimonio: '', descricao: '' });
   const [erro, setErro] = useState('');
   const [sucesso, setSucesso] = useState('');
+  const [populando, setPopulando] = useState(false);
+
+  const COMPUTADORES_SEED = [
+    { patrimonio: 'PC-001', descricao: 'Computador Dell OptiPlex - Mesa 01' },
+    { patrimonio: 'PC-002', descricao: 'Computador Dell OptiPlex - Mesa 02' },
+    { patrimonio: 'PC-003', descricao: 'Computador Dell OptiPlex - Mesa 03' },
+    { patrimonio: 'PC-004', descricao: 'Computador Dell OptiPlex - Mesa 04' },
+    { patrimonio: 'PC-005', descricao: 'Computador Dell OptiPlex - Mesa 05' },
+    { patrimonio: 'PC-006', descricao: 'Computador HP ProDesk - Mesa 06' },
+    { patrimonio: 'PC-007', descricao: 'Computador HP ProDesk - Mesa 07' },
+    { patrimonio: 'PC-008', descricao: 'Computador HP ProDesk - Mesa 08' },
+    { patrimonio: 'PC-009', descricao: 'Computador Lenovo ThinkCentre - Mesa 09' },
+    { patrimonio: 'PC-010', descricao: 'Computador Lenovo ThinkCentre - Mesa 10' },
+  ];
+
+  async function handlePopular() {
+    setPopulando(true);
+    setErro('');
+    let criados = 0;
+    for (const pc of COMPUTADORES_SEED) {
+      try { await computadorService.criar(pc); criados++; } catch (_) {}
+    }
+    setSucesso(`${criados} computador(es) criado(s)!`);
+    setPopulando(false);
+    carregar();
+  }
 
   async function carregar() {
     setLoading(true);
@@ -49,7 +75,14 @@ export default function AdminComputadores() {
       <PageHeader
         title="Computadores"
         subtitle="Gerenciar equipamentos e disponibilidade"
-        action={<Button onClick={() => setModalForm(true)}>+ Novo Computador</Button>}
+        action={
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="outline" onClick={handlePopular} disabled={populando}>
+              {populando ? '⏳ Criando...' : '🚀 Popular Dados'}
+            </Button>
+            <Button onClick={() => setModalForm(true)}>+ Novo Computador</Button>
+          </div>
+        }
       />
 
       {sucesso && <div style={{ marginBottom: 14 }}><Alert type="success">{sucesso}</Alert></div>}
@@ -133,7 +166,9 @@ export function CalendarioDisponibilidade({ recurso, tipo, onClose }) {
       {loading ? <Spinner /> : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
           {slots.map(s => {
-            const ocupado = slotOcupado(s, ocupados);
+            const capacidade = tipo === 'computador' ? 2 : 1;
+            const ocupado = slotOcupado(s, ocupados, capacidade);
+            const pessoas = pessoasNoSlot(s, ocupados);
             return (
               <div key={s.inicio} style={{
                 padding: '8px 6px', borderRadius: 6, textAlign: 'center', fontSize: 12, fontWeight: 600,
@@ -143,7 +178,7 @@ export function CalendarioDisponibilidade({ recurso, tipo, onClose }) {
               }}>
                 {s.inicio}–{s.fim}
                 <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2 }}>
-                  {ocupado ? '🔴 Ocupado' : '🟢 Livre'}
+                  {ocupado ? '🔴 Ocupado' : tipo === 'computador' && pessoas > 0 ? `🟡 ${2 - pessoas} vaga livre` : '🟢 Livre'}
                 </div>
               </div>
             );

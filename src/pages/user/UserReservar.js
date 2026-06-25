@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { computadorService, salaService, reservaService } from '../../services/api';
 import { Card, Button, Input, Alert, Select, Spinner } from '../../components/common/UI';
 import { useAuth } from '../../contexts/AuthContext';
-import { today, gerarSlots, slotOcupado } from '../../utils/helpers';
+import { today, gerarSlots, slotOcupado, pessoasNoSlot } from '../../utils/helpers';
 
 export default function UserReservar() {
   const { user } = useAuth();
@@ -18,6 +18,7 @@ export default function UserReservar() {
   const [ocupados, setOcupados] = useState([]);
   const [horaInicio, setHoraInicio] = useState('');
   const [horaFim, setHoraFim] = useState('');
+  const [duracaoHoras, setDuracaoHoras] = useState(1);
   const [numPessoas, setNumPessoas] = useState(1);
   const [loading, setLoading] = useState(false);
   const [loadingSlots, setLoadingSlots] = useState(false);
@@ -49,10 +50,21 @@ export default function UserReservar() {
   const recurso = recursos.find(r => r.id === recursoId);
 
   function selecionarSlot(s) {
-    if (slotOcupado(s, ocupados)) return;
+    const capacidade = tipo === 'computador' ? 2 : 1;
+    const pessoas = pessoasNoSlot(s, ocupados);
+    if (pessoas + Number(numPessoas || 1) > capacidade) return;
     setHoraInicio(s.inicio);
-    setHoraFim(s.fim);
+    const [h, m] = s.inicio.split(':').map(Number);
+    const fimMin = h * 60 + m + Number(duracaoHoras) * 60;
+    setHoraFim(`${String(Math.floor(fimMin / 60)).padStart(2, '0')}:${String(fimMin % 60).padStart(2, '0')}`);
   }
+
+  useEffect(() => {
+    if (!horaInicio) return;
+    const [h, m] = horaInicio.split(':').map(Number);
+    const fimMin = h * 60 + m + Number(duracaoHoras) * 60;
+    setHoraFim(`${String(Math.floor(fimMin / 60)).padStart(2, '0')}:${String(fimMin % 60).padStart(2, '0')}`);
+  }, [duracaoHoras, horaInicio]);
 
   async function handleConfirmar() {
     setErro('');
@@ -147,6 +159,12 @@ export default function UserReservar() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <Input type="date" label="Data" value={data} onChange={e => setData(e.target.value)} min={today()} />
 
+            <Select label="Tempo de uso" value={duracaoHoras} onChange={e => setDuracaoHoras(Number(e.target.value))}>
+              <option value={1}>1 hora</option>
+              <option value={2}>2 horas (precisa aprovação do admin)</option>
+              <option value={3}>3 horas (precisa aprovação do admin)</option>
+            </Select>
+
             {loadingSlots ? <Spinner /> : slots.length > 0 && (
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
@@ -154,7 +172,17 @@ export default function UserReservar() {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
                   {slots.map(s => {
-                    const ocupado = slotOcupado(s, ocupados);
+                    const capacidade = tipo === 'computador' ? 2 : 1;
+                    const [sh, sm] = s.inicio.split(':').map(Number);
+                    const fimMin = sh * 60 + sm + Number(duracaoHoras) * 60;
+                    const slotSolicitado = {
+                      inicio: s.inicio,
+                      fim: `${String(Math.floor(fimMin / 60)).padStart(2, '0')}:${String(fimMin % 60).padStart(2, '0')}`,
+                    };
+                    const pessoas = pessoasNoSlot(slotSolicitado, ocupados);
+                    const ocupado = slotOcupado(slotSolicitado, ocupados, capacidade) ||
+                      pessoas + Number(numPessoas || 1) > capacidade ||
+                      fimMin > 22 * 60;
                     const sel = horaInicio === s.inicio;
                     return (
                       <button key={s.inicio} type="button" onClick={() => selecionarSlot(s)}
@@ -177,6 +205,7 @@ export default function UserReservar() {
                 {horaInicio && (
                   <div style={{ marginTop: 10, padding: '8px 12px', background: '#eff6ff', borderRadius: 6, fontSize: 13, color: '#1d4ed8' }}>
                     ✓ Selecionado: <b>{horaInicio} – {horaFim}</b>
+                    {duracaoHoras > 1 && <span> · aguardará aprovação do admin</span>}
                   </div>
                 )}
               </div>
@@ -207,6 +236,8 @@ export default function UserReservar() {
               ['Patrimônio', recurso?.patrimonio],
               ['Data', data?.split('-').reverse().join('/')],
               ['Horário', `${horaInicio} – ${horaFim}`],
+              ['Tempo de uso', `${duracaoHoras} hora${duracaoHoras > 1 ? 's' : ''}`],
+              ['Aprovação', duracaoHoras > 1 ? 'Necessária' : 'Automática'],
               ['Pessoas', numPessoas],
             ].map(([k, v]) => (
               <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f3f4f6' }}>
@@ -217,7 +248,7 @@ export default function UserReservar() {
           </div>
 
           <div style={{ padding: '10px 14px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, fontSize: 13, color: '#92400e', marginBottom: 16 }}>
-            ⚠️ Reservas mínimas de 1 hora. Cancelamento disponível até 30 min antes. Check-in disponível 5 min antes do início.
+            ⚠️ Reservas de 1 hora são confirmadas automaticamente. Acima de 1 hora, o admin precisa aprovar. Cancelamento e check-in ficam disponíveis até 30 min antes do início.
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
